@@ -50,6 +50,7 @@ label.opt small{display:block;color:var(--muted)}
 .pp .btn{margin-top:8px;width:100%;background:#fff;color:#222;border-color:#ccc}
 .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin:0 4px 0 6px;border:1px solid #fff;vertical-align:-1px}
 .ck{margin-top:4px;line-height:1.7}
+.sw{display:inline-block;width:12px;height:12px;border-radius:2px;background:#e8590c;border:1.5px solid #7c2d12;margin-right:6px;vertical-align:-1px}
 .status{font-size:12px;color:var(--ink2);margin-top:6px;min-height:1em}
 @media (max-width:600px){
   .panel{top:auto;bottom:0;left:0;right:0;width:auto;max-width:none;max-height:55vh;border-radius:12px 12px 0 0}
@@ -79,10 +80,12 @@ label.opt small{display:block;color:var(--muted)}
       <label class="opt"><input type="radio" name="layer" value="none"><span>None<small>Just the street map</small></span></label>
     </fieldset>
     <div class="key" id="key"></div>
+    <label class="opt"><input type="checkbox" id="estates" checked><span><span class="sw"></span>Council estates and buildings<small>Mapped by the council itself. Only Camden, Hackney, Hounslow, Lambeth and Wandsworth publish this, so other boroughs show none.</small></span></label>
     <label class="opt"><input type="checkbox" id="boroughs" checked><span>Show borough outlines</span></label>
     <div class="status" id="status">Loading neighbourhood data…</div>
     <div class="foot">
       Data: <a href="https://www.nomisweb.co.uk/datasets/c2021ts054">ONS Census 2021 TS054</a> ·
+      council estates from Camden, Hackney, Hounslow, Lambeth and Wandsworth open data ·
       <a href="https://www.gov.uk/government/statistics/english-indices-of-deprivation-2025">English Indices of Deprivation 2025</a> ·
       <a href="https://data.london.gov.uk/dataset/mps-recorded-crime-geographic-breakdown-exy3m">Met Police LSOA crime</a> (<span id="months"></span>) ·
       street crimes from <a href="https://data.police.uk/">data.police.uk</a> ·
@@ -120,7 +123,7 @@ const grey = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/C
 street.addTo(map);
 L.control.layers({'Street map':street, 'Plain grey map':grey}, null, {position:'topright'}).addTo(map);
 
-let current = 'pla', areas, boroughLayer, crimeLayer = L.layerGroup().addTo(map);
+let current = 'pla', areas, boroughLayer, estateLayer, crimeLayer = L.layerGroup().addTo(map);
 const panel = document.getElementById('panel');
 
 function drawKey(){
@@ -195,6 +198,27 @@ async function loadStreetCrimes(ll){
 fetch('data/lsoa.geojson').then(r=>r.json()).then(gj => {
   areas = L.geoJSON(gj, {style, onEachFeature:onEach}).addTo(map);
   document.getElementById('status').textContent = '';
+});
+map.createPane('estates'); map.getPane('estates').style.zIndex = 450;
+const esc = t => String(t).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function estatePopup(p){
+  const rows = [];
+  if (p.e) rows.push(['Estate', esc(p.e)]);
+  if (p.t) rows.push(['Type', esc(p.t)]);
+  if (p.h) rows.push(['Council homes', p.h.toLocaleString('en-GB')]);
+  if (p.bl) rows.push(['Blocks', esc(p.bl)]);
+  return `<div class="pp"><h3>${esc(p.n)}</h3><div class="b">${p.b} council housing · ${p.k==='b' ? 'building' : 'estate'}</div>
+    <table>${rows.map(([a,b])=>`<tr><td>${a}</td><td>${b}</td></tr>`).join('')}</table>
+    <div class="note">Source: London Borough of ${p.b} open data.</div></div>`;
+}
+fetch('data/estates.geojson').then(r=>r.json()).then(gj => {
+  estateLayer = L.geoJSON(gj, {pane:'estates',
+    style:{color:'#7c2d12', weight:1.2, fillColor:'#e8590c', fillOpacity:.6},
+    onEachFeature:(f,l)=>{ l.bindPopup(()=>estatePopup(f.properties), {maxWidth:300}); l.bindTooltip(esc(f.properties.n), {sticky:true}); }});
+  if (document.getElementById('estates').checked) estateLayer.addTo(map);
+});
+document.getElementById('estates').addEventListener('change', e => {
+  if (!estateLayer) return; e.target.checked ? estateLayer.addTo(map) : map.removeLayer(estateLayer);
 });
 fetch('data/boroughs.geojson').then(r=>r.json()).then(gj => {
   boroughLayer = L.geoJSON(gj, {style:{fill:false, color:'#333', weight:1.6, opacity:.8}, interactive:false,
