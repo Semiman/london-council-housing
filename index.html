@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>London Council Housing Map</title>
+<meta name="description" content="Interactive map of council and social housing, deprivation and crime across London's neighbourhoods.">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+:root{
+  --bg:#fcfcfb; --panel:#ffffffee; --ink:#1f1f1d; --ink2:#5b5b57; --muted:#8a8a85; --line:#e2e1dc; --accent:#256abf;
+  --nodata:#d9d8d3; --edge:#ffffff;
+}
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#1a1a19; --panel:#232321ee; --ink:#ededea; --ink2:#b5b4ae; --muted:#86857f; --line:#3a3a37; --accent:#6da7ec; --nodata:#4a4a46; --edge:#1a1a19; }
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+#map{position:absolute;inset:0}
+.panel{position:absolute;z-index:1000;top:12px;left:12px;width:320px;max-width:calc(100vw - 24px);max-height:calc(100vh - 24px);overflow:auto;
+  background:var(--panel);backdrop-filter:blur(6px);border:1px solid var(--line);border-radius:10px;padding:14px 16px;box-shadow:0 4px 18px #0002}
+h1{font-size:17px;margin:0 0 2px}
+.sub{color:var(--ink2);margin:0 0 12px;font-size:13px}
+.search{display:flex;gap:6px;margin-bottom:12px}
+.search input{flex:1;min-width:0;padding:7px 9px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit}
+.search button,.btn{padding:7px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit;cursor:pointer}
+.search button:hover,.btn:hover{border-color:var(--accent)}
+fieldset{border:0;margin:0 0 10px;padding:0}
+legend{font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink2);margin-bottom:4px}
+label.opt{display:flex;gap:8px;align-items:flex-start;padding:4px 0;cursor:pointer}
+label.opt input{margin-top:3px}
+label.opt small{display:block;color:var(--muted)}
+.key{margin:6px 0 10px}
+.key .bar{display:flex;gap:2px}
+.key .bar span{flex:1;height:12px;border-radius:2px}
+.key .lbl{display:flex;justify-content:space-between;color:var(--ink2);font-size:12px;margin-top:3px}
+.key .t{font-size:12px;color:var(--ink2);margin-bottom:4px}
+.foot{font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px;margin-top:6px}
+.foot a{color:var(--ink2)}
+#toggle{display:none}
+.leaflet-popup-content{margin:12px 14px;min-width:240px;font:13px/1.45 system-ui,sans-serif}
+.pp h3{margin:0 0 2px;font-size:15px}
+.pp .b{color:#666;margin-bottom:8px}
+.pp table{border-collapse:collapse;width:100%}
+.pp td{padding:2px 0;vertical-align:top}
+.pp td+td{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
+.pp .sec{margin-top:8px;font-weight:600;font-size:12px;color:#444}
+.pp .cg td{font-weight:400;font-size:12px}
+.pp .note{font-size:11.5px;color:#777;margin-top:6px}
+.pp .btn{margin-top:8px;width:100%;background:#fff;color:#222;border-color:#ccc}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin:0 4px 0 6px;border:1px solid #fff;vertical-align:-1px}
+.ck{margin-top:4px;line-height:1.7}
+.status{font-size:12px;color:var(--ink2);margin-top:6px;min-height:1em}
+@media (max-width:600px){
+  .panel{top:auto;bottom:0;left:0;right:0;width:auto;max-width:none;max-height:55vh;border-radius:12px 12px 0 0}
+  .panel.collapsed .body{display:none}
+  #toggle{display:inline-block;float:right}
+}
+</style>
+</head>
+<body>
+<div id="map" role="application" aria-label="Map of London neighbourhoods"></div>
+<div class="panel" id="panel">
+  <button class="btn" id="toggle" aria-expanded="true">Hide</button>
+  <h1>London council housing &amp; safety</h1>
+  <p class="sub">4,994 neighbourhoods (LSOAs). Click any area for details.</p>
+  <div class="body">
+    <form class="search" id="search">
+      <input id="q" placeholder="Postcode, e.g. SE15 5DQ" aria-label="Postcode">
+      <button type="submit">Go</button>
+    </form>
+    <fieldset>
+      <legend>Colour areas by</legend>
+      <label class="opt"><input type="radio" name="layer" value="pla" checked><span>Council-rented homes<small>% of households renting from the council (Census 2021)</small></span></label>
+      <label class="opt"><input type="radio" name="layer" value="pso"><span>All social housing<small>% renting from council or housing association</small></span></label>
+      <label class="opt"><input type="radio" name="layer" value="imd"><span>Deprivation<small>Index of Multiple Deprivation 2025, national decile</small></span></label>
+      <label class="opt"><input type="radio" name="layer" value="cr"><span>Recorded crime<small>Crimes per 1,000 residents, last 12 months</small></span></label>
+      <label class="opt"><input type="radio" name="layer" value="crd"><span>Crime deprivation<small>IMD 2025 crime domain, national decile</small></span></label>
+      <label class="opt"><input type="radio" name="layer" value="none"><span>None<small>Just the street map</small></span></label>
+    </fieldset>
+    <div class="key" id="key"></div>
+    <label class="opt"><input type="checkbox" id="boroughs" checked><span>Show borough outlines</span></label>
+    <div class="status" id="status">Loading neighbourhood data…</div>
+    <div class="foot">
+      Data: <a href="https://www.nomisweb.co.uk/datasets/c2021ts054">ONS Census 2021 TS054</a> ·
+      <a href="https://www.gov.uk/government/statistics/english-indices-of-deprivation-2025">English Indices of Deprivation 2025</a> ·
+      <a href="https://data.london.gov.uk/dataset/mps-recorded-crime-geographic-breakdown-exy3m">Met Police LSOA crime</a> (<span id="months"></span>) ·
+      street crimes from <a href="https://data.police.uk/">data.police.uk</a> ·
+      boundaries © ONS. Contains OS data © Crown copyright. Crime per resident runs high in town centres where few people live. City of London is policed separately, so it has no Met crime figures.
+    </div>
+  </div>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const CRIME_MONTHS = ['Oct 2025', 'Sep 2026'];
+const BLUE = ['#cde2fb','#86b6ef','#3987e5','#1c5cab','#0d366b'];
+const RED  = ['#fde4d4','#f7b38f','#eb6834','#c2410c','#7c2d12'];
+const LAYERS = {
+  pla: {title:'% households renting from council', ramp:BLUE, breaks:[2,8,18,32], labels:['<2%','8%','18%','32%+'], fmt:v=>v+'%'},
+  pso: {title:'% households in social housing', ramp:BLUE, breaks:[8,20,35,50], labels:['<8%','20%','35%','50%+'], fmt:v=>v+'%'},
+  imd: {title:'Deprivation decile (England)', ramp:RED, decile:true, labels:['Least deprived','Most deprived']},
+  cr:  {title:'Crimes per 1,000 residents, 12 months', ramp:RED, breaks:[40,60,90,150], labels:['<40','60','90','150+'], fmt:v=>v},
+  crd: {title:'Crime decile (England)', ramp:RED, decile:true, labels:['Lowest crime','Highest crime']},
+};
+document.getElementById('months').textContent = CRIME_MONTHS.join('–');
+
+function colourFor(layer, p){
+  const L = LAYERS[layer], v = p[layer];
+  if (v === null || v === undefined) return getComputedStyle(document.documentElement).getPropertyValue('--nodata');
+  if (L.decile) return L.ramp[Math.min(4, Math.floor((10 - v) / 2))]; // decile 1 = most deprived = darkest
+  let i = 0; while (i < L.breaks.length && v >= L.breaks[i]) i++;
+  return L.ramp[i];
+}
+
+const map = L.map('map', {zoomControl:false, preferCanvas:true}).setView([51.505, -0.11], 11);
+L.control.zoom({position:'topright'}).addTo(map);
+L.control.scale({position:'bottomright', imperial:false}).addTo(map);
+const street = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:19, attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'});
+const grey = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}', {maxZoom:16, attribution:'Tiles © Esri'});
+street.addTo(map);
+L.control.layers({'Street map':street, 'Plain grey map':grey}, null, {position:'topright'}).addTo(map);
+
+let current = 'pla', areas, boroughLayer, crimeLayer = L.layerGroup().addTo(map);
+const panel = document.getElementById('panel');
+
+function drawKey(){
+  const k = document.getElementById('key');
+  if (current === 'none'){ k.innerHTML = ''; return; }
+  const L_ = LAYERS[current];
+  k.innerHTML = `<div class="t">${L_.title}</div><div class="bar">${L_.ramp.map(c=>`<span style="background:${c}"></span>`).join('')}</div>`+
+    `<div class="lbl">${L_.labels.map(s=>`<span>${s}</span>`).join('')}</div>`;
+}
+function style(f){
+  if (current === 'none') return {stroke:false, fill:false};
+  return {fillColor:colourFor(current, f.properties), fillOpacity:map.getZoom() >= 15 ? .45 : .62, color:'#fff', weight:.4, opacity:.7};
+}
+
+function popupHtml(p){
+  const rows = (pairs) => pairs.map(([a,b])=>`<tr><td>${a}</td><td>${b}</td></tr>`).join('');
+  const cg = Object.entries(p.cg||{}).slice(0,5);
+  const n = x => x.toLocaleString('en-GB');
+  return `<div class="pp"><h3>${p.nm}</h3><div class="b">${p.b} · ${p.c}</div>
+  <table>${rows([
+    ['Households (2021)', n(p.hh)],
+    ['Renting from council', `${n(p.la)} (${p.pla}%)`],
+    ['Other social rent', `${n(p.os)} (${(p.pso-p.pla).toFixed(1)}%)`],
+    ['Deprivation decile', `${p.imd} of 10`],
+    ['Rank in England', `${n(p.imdr)} of 33,755`],
+    ['Crime decile', `${p.crd} of 10`],
+    ['Crimes, last 12 months', p.cn===null ? 'n/a' : n(p.cn)],
+    ['Per 1,000 residents', p.cr===null ? 'n/a' : p.cr],
+  ])}</table>
+  ${cg.length ? `<div class="sec">Top crime types</div><table class="cg">${rows(cg.map(([k,v])=>[k.charAt(0)+k.slice(1).toLowerCase(), n(v)]))}</table>`:''}
+  <div class="note">Deciles: 1 = most deprived / highest crime 10% of areas in England.</div>
+  <button class="btn" data-street="1">Show street-level crimes nearby</button></div>`;
+}
+
+let lastClick;
+function onEach(f, layer){
+  layer.on('click', e => { lastClick = e.latlng; });
+  layer.bindPopup(() => popupHtml(f.properties), {maxWidth:300});
+  layer.on('mouseover', () => { if (current!=='none') layer.setStyle({weight:2, color:'#222'}); });
+  layer.on('mouseout', () => areas.resetStyle(layer));
+}
+
+map.on('zoomend', () => areas && areas.setStyle(style));
+map.on('popupopen', e => {
+  const b = e.popup.getElement().querySelector('[data-street]');
+  if (b) b.onclick = () => loadStreetCrimes(e.popup.getLatLng());
+});
+
+const CAT_COL = {'violent-crime':'#c2410c','anti-social-behaviour':'#8a8a85','burglary':'#7c2d12','robbery':'#9d174d','theft-from-the-person':'#eb6834','vehicle-crime':'#256abf'};
+async function loadStreetCrimes(ll){
+  const st = document.getElementById('status');
+  st.textContent = 'Loading street-level crimes…';
+  try{
+    const r = await fetch(`https://data.police.uk/api/crimes-street/all-crime?lat=${ll.lat.toFixed(5)}&lng=${ll.lng.toFixed(5)}`);
+    if (!r.ok) throw new Error(r.status);
+    const crimes = await r.json();
+    crimeLayer.clearLayers();
+    crimes.forEach(c => {
+      const m = L.circleMarker([+c.location.latitude, +c.location.longitude], {radius:5, weight:1.5, color:'#fff', fillColor:CAT_COL[c.category]||'#5b5b57', fillOpacity:.9});
+      m.bindTooltip(`${c.category.replace(/-/g,' ')}<br>${c.location.street.name}<br>${c.month}`);
+      crimeLayer.addLayer(m);
+    });
+    const month = crimes[0] ? crimes[0].month : '';
+    const key = Object.entries(CAT_COL).map(([k,c])=>`<span style="white-space:nowrap"><span class="dot" style="background:${c}"></span>${k.replace(/-/g,' ')}</span>`).join(' ') +
+      ` <span style="white-space:nowrap"><span class="dot" style="background:#5b5b57"></span>other</span>`;
+    st.innerHTML = `${crimes.length.toLocaleString('en-GB')} crimes within 1 mile in ${month} (data.police.uk). <a href="#" id="clr">Clear</a><div class="ck">${key}</div>`;
+    document.getElementById('clr').onclick = ev => { ev.preventDefault(); crimeLayer.clearLayers(); st.textContent=''; };
+    map.closePopup();
+  }catch(err){ st.textContent = 'Could not load street crimes from data.police.uk right now.'; }
+}
+
+fetch('data/lsoa.geojson').then(r=>r.json()).then(gj => {
+  areas = L.geoJSON(gj, {style, onEachFeature:onEach}).addTo(map);
+  document.getElementById('status').textContent = '';
+});
+fetch('data/boroughs.geojson').then(r=>r.json()).then(gj => {
+  boroughLayer = L.geoJSON(gj, {style:{fill:false, color:'#333', weight:1.6, opacity:.8}, interactive:false,
+    onEachFeature:(f,l)=>l.bindTooltip(f.properties.name,{sticky:true})});
+  if (document.getElementById('boroughs').checked) boroughLayer.addTo(map);
+});
+
+document.querySelectorAll('input[name=layer]').forEach(r => r.addEventListener('change', e => {
+  current = e.target.value; areas && areas.setStyle(style); drawKey();
+}));
+document.getElementById('boroughs').addEventListener('change', e => {
+  if (!boroughLayer) return; e.target.checked ? boroughLayer.addTo(map) : map.removeLayer(boroughLayer);
+});
+document.getElementById('toggle').addEventListener('click', e => {
+  const c = panel.classList.toggle('collapsed'); e.target.textContent = c ? 'Show' : 'Hide'; e.target.setAttribute('aria-expanded', !c);
+});
+document.getElementById('search').addEventListener('submit', async e => {
+  e.preventDefault();
+  const q = document.getElementById('q').value.trim(), st = document.getElementById('status');
+  if (!q) return;
+  try{
+    const r = await fetch('https://api.postcodes.io/postcodes/' + encodeURIComponent(q));
+    const j = await r.json();
+    if (!r.ok || !j.result) throw new Error();
+    const ll = L.latLng(j.result.latitude, j.result.longitude);
+    let hit;
+    areas.eachLayer(l => { if (l.feature.properties.c === j.result.codes.lsoa21) hit = l; });
+    if (window.innerWidth <= 600){ panel.classList.add('collapsed'); document.getElementById('toggle').textContent = 'Show'; }
+    map.once('moveend', () => { if (hit) hit.openPopup(ll); else st.textContent = 'That postcode is outside London.'; });
+    map.setView(ll, 15);
+  }catch(err){ st.textContent = 'Postcode not found.'; }
+});
+drawKey();
+if (window.innerWidth <= 600){ panel.classList.add('collapsed'); document.getElementById('toggle').textContent = 'Show'; }
+</script>
+</body>
+</html>
